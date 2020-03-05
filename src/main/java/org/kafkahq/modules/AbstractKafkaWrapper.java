@@ -45,6 +45,8 @@ abstract public class AbstractKafkaWrapper {
     }
 
     private Map<String, Collection<TopicListing>> listTopics = new HashMap<>();
+    // Convenience storage of topic names only to use during filtering.
+    private Map<String, Collection<String>> listTopicNames = new HashMap<>();
 
     public Collection<TopicListing> listTopics(String clusterId) throws ExecutionException, InterruptedException {
         if (!this.listTopics.containsKey(clusterId)) {
@@ -55,6 +57,10 @@ abstract public class AbstractKafkaWrapper {
                 "List topics",
                 null
             ));
+            this.listTopicNames.put(clusterId, this.listTopics.get(clusterId)
+                    .stream()
+                    .map(TopicListing::name)
+                    .collect(Collectors.toList()));
         }
 
         return this.listTopics.get(clusterId);
@@ -219,11 +225,17 @@ abstract public class AbstractKafkaWrapper {
         consumerGroupOffset.computeIfAbsent(clusterId, s -> new HashMap<>());
 
         if (!this.consumerGroupOffset.get(clusterId).containsKey(groupId)) {
+            // Filter results to only include topic-partitions from existing topics, in order to avoid later "UNKNOWN_TOPIC_PARTITION" errors.
             this.consumerGroupOffset.get(clusterId).put(groupId, Logger.call(
                 () -> kafkaModule.getAdminClient(clusterId)
                     .listConsumerGroupOffsets(groupId)
                     .partitionsToOffsetAndMetadata()
-                    .get(),
+                    .get()
+                    .entrySet()
+                    .stream()
+                    .filter( entry -> this.listTopicNames.get(clusterId).contains(entry.getKey().topic()))
+                    .filter( entry -> entry.getValue() != null)
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
                 "ConsumerGroup Offsets {}",
                 Collections.singletonList(groupId)
             ));
